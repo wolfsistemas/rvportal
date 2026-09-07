@@ -35,9 +35,10 @@ function carregarPdfMake() {
   return _pdfMakePromise;
 }
 
-async function imagemParaBase64PDF(url) {
+async function imagemParaBase64PDF(url, opcoes = {}) {
   if (!url) return null;
-  if (_cacheImagensPDF.has(url)) return _cacheImagensPDF.get(url);
+  const chaveCache = url + (opcoes.quadrada ? '|quadrada' : '');
+  if (_cacheImagensPDF.has(chaveCache)) return _cacheImagensPDF.get(chaveCache);
   try {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -47,7 +48,24 @@ async function imagemParaBase64PDF(url) {
       const img = new Image();
       img.onload = () => {
         try {
-          const MAX = 800;
+          // Fotos de itens viram um quadrado padrão (letterbox branco): todas as
+          // fotos ocupam a MESMA área no PDF, independente da proporção original.
+          if (opcoes.quadrada) {
+            const LADO = 640;
+            const canvas = document.createElement('canvas');
+            canvas.width = LADO;
+            canvas.height = LADO;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, LADO, LADO);
+            const escala = Math.min(LADO / img.width, LADO / img.height);
+            const dw = Math.round(img.width * escala);
+            const dh = Math.round(img.height * escala);
+            ctx.drawImage(img, (LADO - dw) / 2, (LADO - dh) / 2, dw, dh);
+            resolve(canvas.toDataURL('image/jpeg', 0.85));
+            return;
+          }
+          const MAX = opcoes.max || 800;
           let { width, height } = img;
           if (width > MAX || height > MAX) {
             const scale = MAX / Math.max(width, height);
@@ -74,18 +92,19 @@ async function imagemParaBase64PDF(url) {
       };
       img.src = objectUrl;
     });
-    _cacheImagensPDF.set(url, dataUrl);
+    _cacheImagensPDF.set(chaveCache, dataUrl);
     return dataUrl;
   } catch (e) {
     console.warn('Falha ao carregar imagem para o PDF:', url, e);
-    _cacheImagensPDF.set(url, null);
+    _cacheImagensPDF.set(chaveCache, null);
     return null;
   }
 }
 
 
+// Formatação monetária em R$ para o PDF (milhar com ponto, centavos com vírgula).
 function formatarMoedaPDF(valor) {
-  return 'R$ ' + (parseFloat(valor) || 0).toFixed(2);
+  return (parseFloat(valor) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }).replace(/\u00A0/g, ' ');
 }
 
 // Formatação monetária no padrão brasileiro (R$ 1.234,56) para a UI.
@@ -1392,10 +1411,14 @@ class OrcamentosMDF {
     if (!container) return;
     container.innerHTML = this.itens.filter(i => !i.removido).map((item, idx) => `
       <div class="flex flex-col md:flex-row gap-3 items-start border border-slate-200 rounded-xl p-3 bg-white">
-        <div class="w-40 h-40 rounded-lg border bg-slate-100 flex items-center justify-center cursor-pointer overflow-hidden relative" onclick="this.querySelector('input[type=file]').click()">
-          ${item.foto_url 
-            ? `<img src="${escaparHTML(item.foto_url)}" class="w-full h-full object-cover" alt="Foto" style="position: absolute; inset: 0;">`
-            : `<i data-lucide="camera" class="w-12 h-12 text-slate-400"></i>`
+        <div class="relative w-40 h-40 rounded-lg border bg-slate-100 overflow-hidden">
+          ${item.foto_url
+            ? `<img src="${escaparHTML(item.foto_url)}" class="w-full h-full object-cover" alt="Foto" style="position: absolute; inset: 0;">
+               <button type="button" onclick="event.stopPropagation(); if(window.mdfOrcamentosManager) window.mdfOrcamentosManager.removerFotoItem(${idx})" title="Excluir foto" class="absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center shadow-md"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+               <button type="button" onclick="this.parentElement.querySelector('input[type=file]').click()" title="Trocar foto" class="absolute bottom-1.5 right-1.5 z-10 w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center"><i data-lucide="camera" class="w-4 h-4"></i></button>`
+            : `<div class="w-full h-full flex items-center justify-center cursor-pointer hover:bg-slate-200 transition" onclick="this.querySelector('input[type=file]').click()">
+                 <i data-lucide="camera" class="w-12 h-12 text-slate-400"></i>
+               </div>`
           }
           <input type="file" accept="image/*" class="hidden" onchange="if(window.mdfOrcamentosManager) window.mdfOrcamentosManager.uploadImagemItem(this, ${idx})">
         </div>
@@ -1428,6 +1451,14 @@ class OrcamentosMDF {
       console.error(e);
       window.showToast(e.message || 'Erro ao enviar imagem.', true);
     }
+  }
+
+  removerFotoItem(index) {
+    if (!this.itens[index]) return;
+    this.itens[index].foto_url = '';
+    this.renderizarItens();
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+    window.showToast('Foto removida do item.');
   }
 
   atualizarTotais() {
@@ -1676,8 +1707,8 @@ class OrcamentosMDF {
     const total = Math.max(0, subtotal - descontoTotal);
 
     const [logoBase64, ...fotosBase64] = await Promise.all([
-      imagemParaBase64PDF(LOGO_RV_PORTAL),
-      ...itensNormalizados.map(i => imagemParaBase64PDF(i.foto_url))
+      imagemParaBase64PDF(LOGO_RV_PORTAL, { max: 220 }),
+      ...itensNormalizados.map(i => imagemParaBase64PDF(i.foto_url, { quadrada: true }))
     ]);
 
     const imagens = {};
@@ -1685,28 +1716,42 @@ class OrcamentosMDF {
 
     const linhasTabela = itensNormalizados.map((item, idx) => {
       const fotoBase64 = fotosBase64[idx] || null;
-      let celulaItem = { text: item.nome, bold: true, fontSize: 10 };
+      let celulaItem;
       if (fotoBase64) {
         const chaveFoto = 'foto_' + idx;
         imagens[chaveFoto] = fotoBase64;
+        // Miniatura QUADRADA padrão (84x84) independente do tamanho/arquivo da foto
+        celulaItem = {
+          columns: [
+            { width: 84, image: chaveFoto, fit: [84, 84], alignment: 'left' },
+            {
+              width: '*',
+              stack: [
+                { text: item.nome, bold: true, fontSize: 11, margin: [0, 0, 0, 3] },
+                item.descricao ? { text: item.descricao, fontSize: 9, color: '#475569' } : ''
+              ]
+            }
+          ],
+          columnGap: 8
+        };
+      } else {
         celulaItem = {
           stack: [
-            { image: chaveFoto, fit: [100, 100], alignment: 'center' },
-            { text: item.nome, bold: true, fontSize: 10, alignment: 'center', margin: [0, 4, 0, 0] }
+            { text: item.nome, bold: true, fontSize: 11, margin: [0, 0, 0, 3] },
+            item.descricao ? { text: item.descricao, fontSize: 9, color: '#475569' } : ''
           ]
         };
       }
       return [
         celulaItem,
-        { text: item.descricao || '', fontSize: 9, color: '#475569' },
         { text: formatarMoedaPDF(item.preco), alignment: 'right', fontSize: 10 },
-        { text: formatarMoedaPDF(item.desconto), alignment: 'right', fontSize: 10 },
-        { text: formatarMoedaPDF(item.preco - item.desconto), alignment: 'right', fontSize: 10, bold: true }
+        { text: item.desconto ? formatarMoedaPDF(item.desconto) : '—', alignment: 'right', fontSize: 10 },
+        { text: formatarMoedaPDF(item.preco - item.desconto), alignment: 'right', fontSize: 11, bold: true }
       ];
     });
 
     const content = [];
-    if (logoBase64) content.push({ image: 'logo', width: 64, alignment: 'center', margin: [0, 0, 0, 4] });
+    if (logoBase64) content.push({ image: 'logo', width: 58, alignment: 'center', margin: [0, 0, 0, 4] });
     content.push(
       { text: 'RV PORTAL MADEIRAS', fontSize: 20, bold: true, color: '#b8a94e', alignment: 'center', margin: [0, 2, 0, 2] },
       { text: 'CNPJ: 30.942.123/0001-02 | Rua Mineiros, 532 - Jataí/GO', fontSize: 9, color: '#475569', alignment: 'center', margin: [0, 0, 0, 12] },
@@ -1719,13 +1764,12 @@ class OrcamentosMDF {
       {
         table: {
           headerRows: 1,
-          widths: [110, '*', 55, 55, 60],
+          widths: ['*', 90, 80, 100],
           body: [
             [
-              { text: 'Item', style: 'tableHeader' },
-              { text: 'Descrição', style: 'tableHeader' },
+              { text: 'Produto', style: 'tableHeader' },
               { text: 'Preço', style: 'tableHeader', alignment: 'right' },
-              { text: 'Desc.', style: 'tableHeader', alignment: 'right' },
+              { text: 'Desconto', style: 'tableHeader', alignment: 'right' },
               { text: 'Total', style: 'tableHeader', alignment: 'right' }
             ],
             ...linhasTabela
