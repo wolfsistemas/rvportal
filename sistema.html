@@ -1010,8 +1010,29 @@
             <div class="space-y-3">
                 <input type="text" id="cli-name" required placeholder="Nome do Cliente" class="w-full p-2 border rounded">
                 <input type="text" id="cli-phone" placeholder="Telefone" class="w-full p-2 border rounded">
-                <input type="text" id="cli-doc" placeholder="CPF/CNPJ" class="w-full p-2 border rounded">
-                <input type="text" id="cli-addr" placeholder="Endereço" class="w-full p-2 border rounded">
+                <div>
+                    <input type="text" id="cli-doc" placeholder="CPF ou CNPJ" inputmode="numeric" oninput="mascaraDocInput(this)" class="w-full p-2 border rounded">
+                    <p class="text-[11px] text-slate-400 mt-0.5">Formato aplicado automaticamente (CPF ou CNPJ).</p>
+                </div>
+
+                <div class="pt-2 border-t border-slate-200"></div>
+                <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Endereço (opcional)</p>
+
+                <div class="flex gap-2">
+                    <input type="text" id="cli-cep" placeholder="CEP" inputmode="numeric" maxlength="9" oninput="mascaraCepInput(this)" onchange="autoBuscaCep()" class="w-32 p-2 border rounded">
+                    <button type="button" onclick="buscarCepCliente()" class="px-3 bg-slate-200 hover:bg-slate-300 rounded text-xs font-bold">Buscar CEP</button>
+                </div>
+                <div class="flex gap-2">
+                    <input type="text" id="cli-logradouro" placeholder="Rua / Avenida" class="flex-1 p-2 border rounded">
+                    <input type="text" id="cli-numero" placeholder="Nº" class="w-20 p-2 border rounded">
+                </div>
+                <input type="text" id="cli-complemento" placeholder="Complemento (opcional)" class="w-full p-2 border rounded">
+                <input type="text" id="cli-bairro" placeholder="Bairro" class="w-full p-2 border rounded">
+                <div class="flex gap-2">
+                    <input type="text" id="cli-cidade" placeholder="Cidade" class="flex-1 p-2 border rounded">
+                    <input type="text" id="cli-uf" placeholder="UF" maxlength="2" class="w-16 p-2 border rounded uppercase">
+                </div>
+                <p id="cli-legado-nota" class="hidden text-[11px] text-slate-400 italic"></p>
             </div>
             <div class="flex gap-2 mt-6">
                 <button type="button" onclick="document.getElementById('client-form-container').classList.add('hidden')" class="flex-1 p-2 bg-slate-200 rounded font-bold">Cancelar</button>
@@ -1709,7 +1730,9 @@
         }));
 
         STATE.clients = (resCli.data || []).map(c => ({
-            id: c.id, name: c.nome, phone: c.telefone, doc: c.documento, address: c.endereco
+            id: c.id, name: c.nome, phone: c.telefone, doc: c.documento, address: c.endereco,
+            logradouro: c.logradouro || '', numero: c.numero || '', complemento: c.complemento || '',
+            bairro: c.bairro || '', cidade: c.cidade || '', uf: c.uf || '', cep: c.cep || ''
         }));
 
         // Mapa id -> produto: usado para resolver o NOME ATUAL do produto
@@ -1843,9 +1866,26 @@
             const isNew = !document.getElementById('cli-id').value;
             const newId = isNew ? getNextId(STATE.clients) : document.getElementById('cli-id').value;
 
+            const docDigitado = (document.getElementById('cli-doc').value || '').trim();
+            const docLimpo = docDigitado.replace(/\D/g, '');
+            const doc = docLimpo ? formatarDocDigitos(docLimpo) : '';
+            if (docDigitado && !doc) {
+                showLoading(false);
+                return showToast('CPF/CNPJ inválido — use 11 (CPF) ou 14 (CNPJ) dígitos.', true);
+            }
+
+            // Endereço estruturado (opcional). Se nada for preenchido,
+            // preserva o endereço texto que o cliente já tinha.
+            const endInfo = lerEnderecoCliente();
+            const endereco = endInfo.preenchido ? montarEnderecoCompleto(endInfo) :
+                             (isNew ? '' : (STATE.clients.find(x => String(x.id) === String(newId))?.address || ''));
+
             const payload = {
-                id: newId, nome: document.getElementById('cli-name').value, telefone: document.getElementById('cli-phone').value,
-                documento: document.getElementById('cli-doc').value, endereco: document.getElementById('cli-addr').value
+                id: newId, nome: document.getElementById('cli-name').value.trim(), telefone: document.getElementById('cli-phone').value.trim(),
+                documento: doc, endereco: endereco,
+                logradouro: endInfo.logradouro, numero: endInfo.numero, complemento: endInfo.complemento,
+                bairro: endInfo.bairro, cidade: endInfo.cidade, uf: endInfo.uf,
+                cep: endInfo.cep || null
             };
 
             const { error } = await sb.from('clientes').upsert(payload);
@@ -1854,6 +1894,87 @@
             document.getElementById('client-form-container').classList.add('hidden');
             showToast("Cliente Salvo!");
             loadData();
+        }
+
+        // ---- Padronização CPF/CNPJ e endereço estruturado ----
+
+        function formatarDocDigitos(d) {
+            if (d.length === 11) {
+                return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+            }
+            if (d.length === 14) {
+                return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+            }
+            return '';
+        }
+
+        function mascaraDocInput(el) {
+            let d = el.value.replace(/\D/g, '').slice(0, 14);
+            if (d.length <= 11) {
+                d = d.replace(/^(\d{3})(\d)/, '$1.$2')
+                     .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+                     .replace(/\.(\d{3})(\d)/, '.$1-$2');
+            } else {
+                d = d.replace(/^(\d{2})(\d)/, '$1.$2')
+                     .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+                     .replace(/\.(\d{3})(\d)/, '.$1/$2')
+                     .replace(/(\d{4})(\d)/, '$1-$2');
+            }
+            el.value = d;
+        }
+
+        function mascaraCepInput(el) {
+            let d = el.value.replace(/\D/g, '').slice(0, 8);
+            el.value = d.length > 5 ? d.replace(/^(\d{5})(\d)/, '$1-$2') : d;
+        }
+
+        function lerEnderecoCliente() {
+            const v = id => (document.getElementById(id)?.value || '').trim();
+            const log = v('cli-logradouro'), num = v('cli-numero'), comp = v('cli-complemento'),
+                  bai = v('cli-bairro'), cid = v('cli-cidade'), uf = v('cli-uf').toUpperCase(),
+                  cep = v('cli-cep').replace(/\D/g, '');
+            return {
+                logradouro: log, numero: num, complemento: comp,
+                bairro: bai, cidade: cid, uf: uf, cep: cep,
+                preenchido: !!(log || num || comp || bai || cid || uf || cep)
+            };
+        }
+
+        function montarEnderecoCompleto(e) {
+            e.preenchido = true;
+            const linha1 = [e.logradouro, e.numero].filter(Boolean).join(', ');
+            const linha2 = [e.bairro, [e.cidade, e.uf].filter(Boolean).join('/')].filter(Boolean).join(' - ');
+            const parts = [linha1, e.complemento, linha2].filter(Boolean);
+            let end = parts.join(' - ');
+            if (e.cep) end = end ? `${end} - CEP ${e.cep}` : `CEP ${e.cep}`;
+            return end;
+        }
+
+        async function buscarCepCliente() {
+            const cep = (document.getElementById('cli-cep')?.value || '').replace(/\D/g, '');
+            if (cep.length !== 8) return showToast('Informe o CEP completo (8 dígitos).', true);
+            showLoading(true);
+            try {
+                const resp = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+                const j = await resp.json();
+                if (j.erro) return showToast('CEP não encontrado.', true);
+                document.getElementById('cli-logradouro').value = j.logradouro || '';
+                document.getElementById('cli-bairro').value = j.bairro || '';
+                document.getElementById('cli-cidade').value = j.localidade || '';
+                document.getElementById('cli-uf').value = j.uf || '';
+                document.getElementById('cli-cep').value = cep.replace(/^(\d{5})(\d{3})$/, '$1-$2');
+                document.getElementById('cli-numero').focus();
+                showToast('Endereço preenchido pelo CEP!');
+            } catch (err) {
+                showToast('Falha ao buscar CEP.', true);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function autoBuscaCep() {
+            const cep = (document.getElementById('cli-cep')?.value || '').replace(/\D/g, '');
+            if (cep.length === 8) buscarCepCliente();
         }
 
         async function deleteClient(id) {
@@ -3833,6 +3954,7 @@ function loadQuoteToCart(id) {
 
         function openClientForm(id) { 
             document.getElementById('client-form-container').classList.remove('hidden'); 
+            const nota = document.getElementById('cli-legado-nota');
             if(id) {
                 const c = STATE.clients.find(x => String(x.id) === String(id));
                 if(c) {
@@ -3840,14 +3962,34 @@ function loadQuoteToCart(id) {
                     document.getElementById('cli-name').value = c.name;
                     document.getElementById('cli-phone').value = c.phone;
                     document.getElementById('cli-doc').value = c.doc;
-                    document.getElementById('cli-addr').value = c.address;
+                    document.getElementById('cli-cep').value = c.cep ? String(c.cep) : '';
+                    document.getElementById('cli-logradouro').value = c.logradouro || '';
+                    document.getElementById('cli-numero').value = c.numero || '';
+                    document.getElementById('cli-complemento').value = c.complemento || '';
+                    document.getElementById('cli-bairro').value = c.bairro || '';
+                    document.getElementById('cli-cidade').value = c.cidade || '';
+                    document.getElementById('cli-uf').value = c.uf || '';
+                    const temEstrutura = c.logradouro || c.numero || c.bairro || c.cidade || c.uf || c.cep;
+                    if (!temEstrutura && c.address) {
+                        nota.textContent = 'Endereço atual registrado: ' + c.address + '. Preencha os campos acima para padronizar.';
+                        nota.classList.remove('hidden');
+                    } else {
+                        nota.classList.add('hidden');
+                    }
                 }
             } else {
                 document.getElementById('cli-id').value = '';
                 document.getElementById('cli-name').value = '';
                 document.getElementById('cli-phone').value = '';
                 document.getElementById('cli-doc').value = '';
-                document.getElementById('cli-addr').value = '';
+                document.getElementById('cli-cep').value = '';
+                document.getElementById('cli-logradouro').value = '';
+                document.getElementById('cli-numero').value = '';
+                document.getElementById('cli-complemento').value = '';
+                document.getElementById('cli-bairro').value = '';
+                document.getElementById('cli-cidade').value = '';
+                document.getElementById('cli-uf').value = '';
+                nota.classList.add('hidden');
             }
         }
 
