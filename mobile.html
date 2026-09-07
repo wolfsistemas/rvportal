@@ -767,6 +767,32 @@
         const sb = window.supabase.createClient(supabaseUrl, supabaseKey);
 
         let STATE = { products: [], clients: [], logs: [], quotes: [], expenses: [], users: [], sales: [] };
+
+        // Resolve o produto de uma log sempre por ID (produto_id) quando houver,
+        // com fallback por nome para registros antigos sem vínculo.
+        function produtoDeLog(l) {
+            if (!l) return null;
+            if (l.productId != null) {
+                const pr = STATE.products.find(p => String(p.id) === String(l.productId));
+                if (pr) return pr;
+            }
+            if (l.productName) {
+                return STATE.products.find(p => String(p.name).trim() === String(l.productName).trim()) || null;
+            }
+            return null;
+        }
+        // Resolve o cliente de uma log/venda por ID (cliente_id) com fallback por nome.
+        function clienteDeLog(l) {
+            if (!l) return null;
+            if (l.clientId != null) {
+                const cl = STATE.clients.find(c => String(c.id) === String(l.clientId));
+                if (cl) return cl;
+            }
+            if (l.clientName) {
+                return STATE.clients.find(c => String(c.name).trim() === String(l.clientName).trim()) || null;
+            }
+            return null;
+        }
         
         let CART = [];
         let CURRENT_QUOTE_ID = null;
@@ -921,19 +947,37 @@
                     const quotesMap = {};
                     const salesMap = {};
                     
+                    const produtoPorId = {};
+                    STATE.products.forEach(pr => { produtoPorId[pr.id] = pr; });
+                    const resolverNomeProduto = (produtoId, nomeGravado) => {
+                        if (produtoId != null && produtoPorId[produtoId]) return produtoPorId[produtoId].name;
+                        return nomeGravado;
+                    };
+
+                    const clientePorId = {};
+                    STATE.clients.forEach(cl => { clientePorId[cl.id] = cl; });
+                    const resolverNomeCliente = (clienteId, nomeGravado) => {
+                        if (clienteId != null && clientePorId[clienteId]) return clientePorId[clienteId].name;
+                        return nomeGravado;
+                    };
+
                     (resLog.data || []).forEach(l => {
                         if (l.tipo === 'orcamento') {
                             const qId = String(l.id);
                             if(!quotesMap[qId]) {
                                 quotesMap[qId] = { 
-                                    id: qId, date: l.data, clientName: l.cliente_nome, items: [], total: 0, 
+                                    id: qId, date: l.data,
+                                    clientName: resolverNomeCliente(l.cliente_id, l.cliente_nome),
+                                    clientId: l.cliente_id != null ? l.cliente_id : null,
+                                    items: [], total: 0, 
                                     status: l.status || 'ABERTO', discount: Number(l.desconto), discountType: l.status_financeiro || '$', 
                                     paymentMethod: l.forma_pagamento, deliveryAddress: l.endereco_entrega, observacao: l.observacao
                                 };
                             }
                             const unitPrice = Number(l.quantidade) > 0 ? Number(l.valor_total) / Number(l.quantidade) : 0;
                             quotesMap[qId].items.push({ 
-                                name: l.produto_nome, 
+                                name: resolverNomeProduto(l.produto_id, l.produto_nome),
+                                productId: l.produto_id != null ? l.produto_id : null,
                                 qty: Number(l.quantidade), 
                                 price: unitPrice, 
                                 total: Number(l.valor_total), 
@@ -946,14 +990,18 @@
                             const qId = String(l.id);
                             if(!salesMap[qId]) {
                                 salesMap[qId] = { 
-                                    id: qId, date: l.data, clientName: l.cliente_nome, items: [], total: 0, 
+                                    id: qId, date: l.data,
+                                    clientName: resolverNomeCliente(l.cliente_id, l.cliente_nome),
+                                    clientId: l.cliente_id != null ? l.cliente_id : null,
+                                    items: [], total: 0, 
                                     status: l.status, discount: Number(l.desconto), discountType: l.status_financeiro || '$', 
                                     paymentMethod: l.forma_pagamento, deliveryAddress: l.endereco_entrega, observacao: l.observacao
                                 };
                             }
                             const unitPrice = Number(l.quantidade) > 0 ? Number(l.valor_total) / Number(l.quantidade) : 0;
                             salesMap[qId].items.push({ 
-                                name: l.produto_nome, 
+                                name: resolverNomeProduto(l.produto_id, l.produto_nome),
+                                productId: l.produto_id != null ? l.produto_id : null,
                                 qty: Number(l.quantidade), 
                                 price: unitPrice, 
                                 total: Number(l.valor_total), 
@@ -964,9 +1012,12 @@
                         }
                         
                         STATE.logs.push({
-                            uid: l.uid, id: l.id, type: l.tipo, productName: l.produto_nome, quantity: Number(l.quantidade),
+                            uid: l.uid, id: l.id, type: l.tipo,
+                            productId: l.produto_id != null ? l.produto_id : null,
+                            productName: resolverNomeProduto(l.produto_id, l.produto_nome), quantity: Number(l.quantidade),
                             date: l.data, note: l.observacao, totalValue: Number(l.valor_total),
-                            clientName: l.cliente_nome, paymentMethod: l.forma_pagamento, status: l.status,
+                            clientId: l.cliente_id != null ? l.cliente_id : null,
+                            clientName: resolverNomeCliente(l.cliente_id, l.cliente_nome), paymentMethod: l.forma_pagamento, status: l.status,
                             finStatus: l.status_financeiro, dueDate: l.vencimento, paidValue: Number(l.valor_pago),
                             discount: Number(l.desconto), deliveryAddress: l.endereco_entrega
                         });
@@ -1591,7 +1642,8 @@
             const valTyped = parseFloat(document.getElementById('pos-discount').value) || 0;
             
             const cliId = document.getElementById('pos-client').value;
-            const clientName = STATE.clients.find(c => c.id == cliId)?.name || "Consumidor Final";
+            const clientSel = STATE.clients.find(c => c.id == cliId);
+            const clientName = clientSel?.name || "Consumidor Final";
             
             const customAddrCheck = document.getElementById('pos-custom-address-check').checked;
             const deliveryAddr = customAddrCheck ? document.getElementById('pos-custom-address').value : '';
@@ -1606,7 +1658,9 @@
             if(CURRENT_QUOTE_ID) await sb.from('logs').delete().eq('id', CURRENT_QUOTE_ID).eq('tipo', 'orcamento');
         
             let quotesToInsert = CART.map(item => ({
-                id: budgetId, tipo: 'orcamento', produto_nome: item.name, quantidade: item.qty,
+                id: budgetId, tipo: 'orcamento', produto_nome: item.name,
+                produto_id: (item.prodId != null && STATE.products.some(p => String(p.id) === String(item.prodId))) ? item.prodId : null,
+                quantidade: item.qty,
                 data: date,
                 observacao: (() => {
                     let metragem = '';
@@ -1614,7 +1668,8 @@
                     let partes = [metragem, obs].filter(s => s);
                     return partes.join(' | ');
                 })(),
-                valor_total: item.total, cliente_nome: clientName, 
+                valor_total: item.total, cliente_nome: clientName,
+                cliente_id: clientSel ? cliId : null,
                 forma_pagamento: document.getElementById('pos-payment').value, status: 'ABERTO', 
                 desconto: valTyped, status_financeiro: type, 
                 endereco_entrega: deliveryAddr, status_entrega: '', qtd_entregue: 0, vencimento: date, valor_pago: 0
@@ -1636,7 +1691,9 @@
     
     let customObsRestored = false;
     CART = q.items.map(item => {
-        const prod = STATE.products.find(p => p.name === item.name);
+        const prod = (item.productId != null)
+            ? STATE.products.find(p => String(p.id) === String(item.productId))
+            : STATE.products.find(p => p.name === item.name);
         const isPartner = prod ? prod.parceiro : false;
         let comprimento = 0, pecas = 0, qty = item.qty;
         let obsItem = item.obs || '';
@@ -1679,7 +1736,9 @@
     CURRENT_QUOTE_ID = q.id; 
     
     const clientSelectBtn = document.getElementById('pos-client-btn').querySelector('span');
-    const clientObj = STATE.clients.find(c => String(c.name).trim() === String(q.clientName).trim());
+    const clientObj = (q.clientId != null)
+        ? STATE.clients.find(c => String(c.id) === String(q.clientId))
+        : STATE.clients.find(c => String(c.name).trim() === String(q.clientName).trim());
     
     if(clientObj) {
         document.getElementById('pos-client').value = clientObj.id;
@@ -2186,7 +2245,9 @@ function downloadPDF(blob, filename) {
 
             try {
                 for (let item of sale.items) {
-                    const prod = STATE.products.find(p => p.name === item.name);
+                    const prod = (item.productId != null)
+                        ? STATE.products.find(p => String(p.id) === String(item.productId))
+                        : STATE.products.find(p => p.name === item.name);
                     if(prod) {
                         const novoEstoque = Number(prod.stock) + Number(item.qty);
                         await sb.from('produtos').update({ estoque_fisico: novoEstoque }).eq('id', prod.id);
@@ -2222,11 +2283,13 @@ function downloadPDF(blob, filename) {
                     id: newId,
                     tipo: 'orcamento',
                     produto_nome: l.productName,
+                    produto_id: (l.productId != null && STATE.products.some(p => String(p.id) === String(l.productId))) ? l.productId : null,
                     quantidade: l.quantity,
                     data: date,
                     observacao: l.note,
                     valor_total: l.totalValue,
                     cliente_nome: l.clientName,
+                    cliente_id: (l.clientId != null && STATE.clients.some(c => String(c.id) === String(l.clientId))) ? l.clientId : null,
                     forma_pagamento: l.paymentMethod || 'Dinheiro',
                     status: 'ABERTO',
                     desconto: sale.discount || 0,
@@ -2822,7 +2885,7 @@ function downloadPDF(blob, filename) {
         
         const vendasFiltradas = STATE.logs.filter(l => {
             if (l.type !== 'venda' || l.status === 'CANCELADO') return false;
-            const prod = STATE.products.find(p => p.name === l.productName);
+            const prod = produtoDeLog(l);
             if (!prod || !prod.parceiro) return false;
             // Comparação corrigida: usar apenas a parte da data
             const dataLog = (l.date || '').split('T')[0];
@@ -2843,7 +2906,7 @@ function downloadPDF(blob, filename) {
               }
               agrupado[l.productName].metros += Number(l.quantity) || 0;
               agrupado[l.productName].valorVenda += Number(l.totalValue) || 0;
-              const prod = STATE.products.find(p => p.name === l.productName);
+              const prod = produtoDeLog(l);
               agrupado[l.productName].custo += prod ? (prod.cost || 0) * (Number(l.quantity) || 0) : 0;
           });
           
