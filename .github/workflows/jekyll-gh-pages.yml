@@ -60,7 +60,7 @@ jobs:
             let s = fs.readFileSync(p, "utf8");
             function setVar(name, raw) {
               let val = String(raw || "").trim();
-              val = val.replace(/^["']/, "").replace(/["'];?\s*$/, "");
+              val = val.replace(/^["\u0027]/, "").replace(/["\u0027];?\s*$/, "");
               if (!val) {
                 console.error("Secret vazio para window." + name);
                 process.exit(1);
