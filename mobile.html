@@ -820,12 +820,32 @@
         let CURRENT_QUOTE_ID = null;
         let currentDocType = 'orcamento';
 
-        window.onload = function() { 
+        window.onload = async function() { 
             if (dadosUsuario) {
+                const ok = await verificarSessaoAuth();
+                if (!ok) return;
                 showLoading(true); 
                 loadData(); 
             }
         };
+
+        // Exige sessao real do Supabase Auth (nao basta o rv_user antigo).
+        async function verificarSessaoAuth() {
+            try {
+                const { data } = await sb.auth.getSession();
+                if (data.session) return true;
+            } catch(e) {}
+            localStorage.removeItem('rv_user');
+            window.location.replace('index.html?motivo=sessao');
+            return false;
+        }
+
+        sb.auth.onAuthStateChange((event) => {
+            if (event === 'SIGNED_OUT') {
+                localStorage.removeItem('rv_user');
+                window.location.replace('index.html?motivo=sessao');
+            }
+        });
 
       function setDocType(type) {
         currentDocType = type;

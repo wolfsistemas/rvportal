@@ -1598,13 +1598,36 @@
             return String(str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
         }
 
-        window.onload = function() { 
+        window.onload = async function() { 
             if (dadosUsuario) {
+                const ok = await verificarSessaoAuth();
+                if (!ok) return;
                 showLoading(true); 
                 loadData(); 
                 startInactivityMonitoring();
             }
         };
+
+        // Exige sessao real do Supabase Auth (nao basta o rv_user antigo).
+        // Depois da migracao de RLS, sem sessao o app nao le nada do banco,
+        // entao forca o usuario a refazer o login.
+        async function verificarSessaoAuth() {
+            try {
+                const { data } = await sb.auth.getSession();
+                if (data.session) return true;
+            } catch(e) {}
+            localStorage.removeItem('rv_user');
+            window.location.replace('index.html?motivo=sessao');
+            return false;
+        }
+
+        // Se o token expirar/refresh falhar no meio do uso, desloga na hora.
+        sb.auth.onAuthStateChange((event) => {
+            if (event === 'SIGNED_OUT') {
+                localStorage.removeItem('rv_user');
+                window.location.replace('index.html?motivo=sessao');
+            }
+        });
 
     
   function navigate(viewId) {

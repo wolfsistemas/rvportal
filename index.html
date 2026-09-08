@@ -93,6 +93,19 @@
         const supabaseKey = 'sb_publishable_B2a4vA22qf4XGcrxPDRAaw_13rW51uI';
         const sb = window.supabase.createClient(supabaseUrl, supabaseKey);
 
+        // Se chegou aqui por sessao expirada/sem login valido, limpa e avisa.
+        (function motivoSessao() {
+            const motivo = new URLSearchParams(window.location.search).get('motivo');
+            if (motivo === 'sessao') {
+                localStorage.removeItem('rv_user');
+                const msg = document.getElementById('msg-erro');
+                if (msg) {
+                    msg.textContent = "Sessão expirada. Faça login novamente.";
+                    msg.classList.remove('hidden');
+                }
+            }
+        })();
+
         async function fazerLogin(e) {
             e.preventDefault();
             
