@@ -1,13 +1,13 @@
 // ============================================================================
-// config.js - Configuracao PUBLICA do Supabase (frontend)
+// config.js - Configuracao PUBLICA do Supabase (frontend).
 //
-// Os valores __SUPABASE_URL__ e __SUPABASE_ANON_KEY__ sao substituidos
-// automaticamente pelo GitHub Actions no momento do deploy, usando os
-// Secrets do repositorio (Settings > Secrets and variables > Actions).
-//
-// Regra de ouro: esta chave e a anon/publishable (PUBLICA). A seguranca
-// dos dados e feita pela RLS no Supabase. JAMAIS coloque aqui a chave
-// service_role - ela da acesso total e ignora a RLS.
+// IMPORTANTE:
+// 1) As linhas de atribuicao abaixo sao preenchidas automaticamente no deploy
+//    pelo GitHub Actions, usando os repository secrets
+//    (Settings > Secrets and variables > Actions).
+// 2) Nao edite este arquivo manualmente com chaves reais.
+// 3) Esta e a chave PUBLICA (anon/publishable). A protecao dos dados e feita
+//    pela RLS no Supabase. A chave service_role JAMAIS pode ficar aqui.
 // ============================================================================
-window.SUPABASE_URL = '__SUPABASE_URL__';
-window.SUPABASE_ANON_KEY = '__SUPABASE_ANON_KEY__';
+window.SUPABASE_URL = "__SUPABASE_URL__";
+window.SUPABASE_ANON_KEY = "__SUPABASE_ANON_KEY__";

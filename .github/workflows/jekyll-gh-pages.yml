@@ -57,21 +57,26 @@ jobs:
           node -e '
             const fs = require("fs");
             const p = "config.js";
-            const subs = [
-              ["__SUPABASE_URL__", process.env.SUPABASE_URL],
-              ["__SUPABASE_ANON_KEY__", process.env.SUPABASE_ANON_KEY]
-            ];
             let s = fs.readFileSync(p, "utf8");
-            for (const [tok, val] of subs) {
-              if (!s.includes(tok)) {
-                console.error("Placeholder ausente em config.js: " + tok);
+            function setVar(name, raw) {
+              const val = String(raw || "").trim();
+              if (!val) {
+                console.error("Secret vazio para window." + name);
                 process.exit(1);
               }
-              s = s.split(tok).join(val);
+              const re = new RegExp("window\\." + name + "\\s*=\\s*.*?;");
+              if (!re.test(s)) {
+                console.error("Linha window." + name + " nao encontrada no config.js");
+                process.exit(1);
+              }
+              s = s.replace(re, "window." + name + " = " + JSON.stringify(val) + ";");
             }
+            setVar("SUPABASE_URL", process.env.SUPABASE_URL);
+            setVar("SUPABASE_ANON_KEY", process.env.SUPABASE_ANON_KEY);
             fs.writeFileSync(p, s);
-            console.log("config.js atualizado com os secrets.");
+            console.log("config.js atualizado.");
           '
+          node -e 'new Function(require("fs").readFileSync("config.js","utf8")); console.log("Sintaxe do config.js OK.");'
           if grep -q "__SUPABASE" config.js; then
             echo "::error::Sobrou placeholder no config.js"
             exit 1
