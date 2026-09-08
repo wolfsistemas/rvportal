@@ -16,6 +16,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:                                   # <-- lê os secrets
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
     outputs:
       upload_path: ${{ steps.set-path.outputs.upload_path }}
     steps:
@@ -49,6 +52,15 @@ jobs:
           else
             echo "upload_path=." >> $GITHUB_OUTPUT
           fi
+      - name: Inject Supabase keys (build-time)
+        run: |
+          sed -i "s|__SUPABASE_URL__|$SUPABASE_URL|g" \
+            sistema.html mobile.html index.html
+          sed -i "s|__SUPABASE_ANON_KEY__|$SUPABASE_ANON_KEY|g" \
+            sistema.html mobile.html index.html
+
+
+          
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
